@@ -5,15 +5,22 @@ from math import sqrt
 import time
 from abc import ABC, abstractmethod
 import threading
-# -----------------------
+# ----------------------------
 # EXPLICACIONES DEL PROGRAMA
-# -----------------------
-
+# ----------------------------
 '''
 Los cultivos de invernadero más comunes requieren un rango de temperatura 
 de alrededor de 18º-24ºC, por tanto, estableceremos un rango de -10 y +10 de este intervalo
 para que sea logica la temperatura y se cumplan las condiciones propuestas del problema
 '''
+# -----------------------
+# EXCEPCIONES
+# -----------------------
+class ErrorInstancia(Exception):
+    pass
+
+class ErrorNone(Exception):
+    pass
 
 # -----------------------
 # CLASES
@@ -81,23 +88,27 @@ class SistemaIoT(Observer):
     
     def __init__(self, manager_chain):
         if SistemaIoT.__instance != None:                                       # Solo puede haber una instancia
-            raise Exception('No puede haber mas de una instancia del sistema')
+            print('No puede haber mas de una instancia del sistema')
+            raise ErrorInstancia
         else:
             self.manager_chain = manager_chain                                  # Variable que habra que indicar al inicializar el sistema para indicar el manejador que empiza el chain responsability
             self.date_temp = []                                                 # Variable para almacenar cada tupla (timestamp, t) nueva
-            self.date = []                                                      # Variable para almacenar cada timestamp de date_temp
+            self.date = ''                                                      # Variable para indicar cada timestamp de date_temp
             self.temp = []                                                      # Variable para almacenar cada t de date_temp
     
-    # Metodo de clase para obtener la instancia
+    # Metodo de clase para obtener la instancia en la que se debe definir un manager_chain
     @classmethod
-    def obtener_instancia(cls):
+    def obtener_instancia(cls, manager_chain=None):
         if not cls.__instance:
-            cls.__instance = cls()
+            if manager_chain is None:
+                print("Se debe proporcionar un manager_chain al crear la primera instancia del sistema.")
+                raise ErrorNone
+            cls.__instance = cls(manager_chain)
         return cls.__instance
     
     # Funcion que va actualizando cada lista cuando recibe una tupla (timestamp, t)(=date_temp) nueva
     def update(self, date_temp):
-        self.date.append(date_temp[0])                                          # En el primer elemento de la tupla se encuentra la fecha
+        self.date = date_temp[0]                                                # En el primer elemento de la tupla se encuentra la fecha
         self.temp.append(date_temp[1])                                          # En el segundo elemento de la tupla se encuentra la temperatura
         self.date_temp.append(date_temp)                                        # Añadimos cada tupla a la lista vacia por si queremos obtener todos los datos en algun momento
         self.manager_chain.manejar_date_temp(self.date, self.temp)              # Empezamos a manejar estos datos (las listas date y temp por separado) para la obtencion del resultado del manejador que hemos inicializado en el SistemaIoT
@@ -106,13 +117,13 @@ class SistemaIoT(Observer):
     def get_date_temp(self):
         return self.date_temp
     
-    # Funcion para obtener todas las fechas generadas
+    # Funcion para obtener la fecha actual
     def get_date(self):
-        return self.date_temp
+        return self.date
     
     # Funcion para obtener todas las temperaturas generadas
     def get_temp(self):
-        return self.date_temp
+        return self.temp
 
 # R3
 # Se trata de un Chain of Responsability que obtendra las dos listas (date y temp) desde la funcion de update que hemos visto anteriormente
@@ -130,25 +141,33 @@ class Manejador(ABC):
 class Aumento(Manejador):
     def manejar_date_temp(self, date, temp):
         n = len(temp)
+        result = False                                                                          # Resultado para comprobarlo en pruebas pytest
         if n >=6:
             ultima_temperatura = temp[-1]
             temperatura_30seg = temp[-6]
             if (ultima_temperatura - temperatura_30seg) > 10:
                 print('Ultimos 30 segundos:\tLa temperatura ha aumentado mas de 10 grados')
-
+                result = True                                                                   # Resultado es cierto para comprobarlo en pruebas pytest
+    
         if self.sucesor:
             self.sucesor.manejar_date_temp(date, temp)
+        
+        return result                                                                           # Devolvemos el resultado para el pytest
 
 # Este sera el segundo paso, la clase Umbral, que comprueba si la temperatura actual del invernadero está por encima de un umbral que hemos definido
 class Umbral(Manejador):
      def manejar_date_temp(self, date, temp):
         umbral = 28                                                 # Hemos indicado como umbral los 28 grados centigrados (es modificabel)
         temperatura_actual = temp[-1]
+        result = False                                              # Resultado para comprobarlo en pruebas pytest
         if temperatura_actual > umbral:
             print('Temperatura actual:\tPor encima del umbral')
-
+            result = True                                           # Resultado es cierto para comprobarlo en pruebas pytest
+            
         if self.sucesor:
             self.sucesor.manejar_date_temp(date, temp)
+
+        return result                                               # Devolvemos el resultado para el pytest
 
 # R4
 # Este sera el primer paso de la chain responsability, la clase ContextoEstadisticos, que tambien seria el contexto del patron Strategy
@@ -188,9 +207,15 @@ class StrategyMeanSd(Strategy):
         if n > 12:
             temp.pop(0)
         
+        # Resultado para comprobarlo en pruebas pytest
+        result = (mean, sd)
+        
         # Mostramos por pantalla
-        print(f"Fecha: {date[-1]}")
+        print(f"Fecha: {date}")
         print(f"Ultimos 60 segundos:\tMedia: {round(mean, 2)}\tDesviacion Tipica: {round(sd, 2)}")
+        
+        # Devolvemos el resultado para el pytest
+        return result
 
 # La siguiente estrategia calcula Q1, Mediana y Q2 de la lista de temperaturas de los ultimos 60 segundos
 class StrategyCuantil(Strategy):
@@ -205,9 +230,15 @@ class StrategyCuantil(Strategy):
         if n > 12:
             temp.pop(0)
         
+        # Resultado para comprobarlo en pruebas pytest
+        result = (Q1, mediana, Q3)
+        
         # Mostramos por pantalla
-        print(f"Fecha: {date[-1]}")
+        print(f"Fecha: {date}")
         print(f"Ultimos 60 segundos:\tQ1: {Q1}\tMediana: {mediana}\tQ3: {Q3}")
+        
+        # Devolvemos el resultado para el pytest
+        return result
 
 # La siguiente estrategia calcula el maximo y el minimo de la lista de temperaturas de los ultimos 60 segundos
 class StrategyMaxMin(Strategy):
@@ -220,9 +251,15 @@ class StrategyMaxMin(Strategy):
         if n > 12:
             temp.pop(0)
         
+        # Resultado para comprobarlo en pruebas pytest
+        result = (maximo, minimo)
+        
         # Mostramos por pantalla
-        print(f"Fecha: {date[-1]}")
+        print(f"Fecha: {date}")
         print(f"Ultimos 60 segundos:\tMaximo: {maximo}\tMinimo: {minimo}") 
+        
+        # Devolvemos el resultado para el pytest
+        return result
 
 # -----------------------
 # SISTEMA DE GESTION
@@ -265,9 +302,9 @@ if __name__ == '__main__':
     print("Cargando...")
 
     # Definimos el sensor y el operador que sera el Sistema con su manejador de iniciacion 
-    sensor_temperatura = Sensor(name)
-    operator = SistemaIoT(contexto)
-    sensor_temperatura.register_observer(operator)              # Registramos el operador
+    sensor_temperatura = Sensor(name)                           # Definimos el sensor
+    sistema = SistemaIoT.obtener_instancia(contexto)            # Obtenemos la instancia del Sistema
+    sensor_temperatura.register_observer(sistema)               # Registramos el sistema para que reciba los datos del sensor
     thread = threading.Thread(target=sensor_temperatura.run)    # Iniciamos el sensor desde un hilo
     thread.start()                                              # Empezamos a ejecutar el hilo
     sensor_temperatura.resume()                                 # Reunudamos el sensor para que ya empieze a funcionar la funcion run del sensor
@@ -286,6 +323,9 @@ if __name__ == '__main__':
             break
         elif opcion == 2:
             while True:
+                print("1: Obtener la media y desviacion tipica")
+                print("2: Obtener los cuantiles")
+                print("3: Obtener el maximo y el minimo")
                 estrategia = int(input("Introduce el numero de la estrategia que deseas emplear: "))
                 if estrategia == 1:
                     contexto.set_strategy(meansd)
